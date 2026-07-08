@@ -67,6 +67,14 @@ export default defineConfig({
                 return
               }
             }
+            // Fallback: serve standard model for any unknown model hash
+            const fallback = path.resolve('./models/model_en.cwm')
+            if (fs.existsSync(fallback)) {
+              res.setHeader('Content-Type', 'application/octet-stream')
+              Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v))
+              fs.createReadStream(fallback).pipe(res)
+              return
+            }
           }
 
           next()
