@@ -70,7 +70,9 @@ export default defineConfig({
             ]
             for (const f of candidates) {
               if (fs.existsSync(f)) {
+                const size = fs.statSync(f).size
                 res.setHeader('Content-Type', 'application/octet-stream')
+                res.setHeader('Content-Length', size)
                 Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v))
                 fs.createReadStream(f).pipe(res)
                 return
@@ -85,7 +87,9 @@ export default defineConfig({
             if (NARROW_MODEL_HASHES.has(hash)) {
               const fallback = path.resolve('./models/model_en.cwm')
               if (fs.existsSync(fallback)) {
+                const size = fs.statSync(fallback).size
                 res.setHeader('Content-Type', 'application/octet-stream')
+                res.setHeader('Content-Length', size)
                 Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v))
                 fs.createReadStream(fallback).pipe(res)
                 return
