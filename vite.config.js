@@ -21,10 +21,23 @@ const DOMAIN_GATE_PATCHED  = 'function Rs(){return true}'
 const PB_ORIGINAL = 'async function pb(t="wasm"){if(!Rs())return;const e="cw_detect"'
 const PB_PATCHED  = 'async function pb(t="wasm"){return;if(!Rs())return;const e="cw_detect"'
 
+// Patch 3: Rebrand all visible DeepCW labels to VU22DX MULTI Decoders
+const BRAND_PATCHES = [
+  ['k$="DeepCW"',                            'k$="VU22DX MULTI Decoders"'],
+  ['"Add DeepCW to your Home Screen"',       '"Add VU22DX MULTI Decoders to your Home Screen"'],
+  ['"Install DeepCW"',                       '"Install VU22DX MULTI Decoders"'],
+  ['children:"DeepCW"',                      'children:"VU22DX MULTI Decoders"'],
+  ['Copyright \u00A9 2026 e04',              'Copyright \u00A9 2026 VU22DX'],
+]
+
 function applyPatches(content) {
-  return content
+  let out = content
     .replace(DOMAIN_GATE_ORIGINAL, DOMAIN_GATE_PATCHED)
     .replace(PB_ORIGINAL, PB_PATCHED)
+  for (const [orig, patched] of BRAND_PATCHES) {
+    out = out.split(orig).join(patched)
+  }
+  return out
 }
 
 function servePatched(filePath, res, extraHeaders = {}) {
