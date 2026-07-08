@@ -67,13 +67,20 @@ export default defineConfig({
                 return
               }
             }
-            // Fallback: serve standard model for any unknown model hash
-            const fallback = path.resolve('./models/model_en.cwm')
-            if (fs.existsSync(fallback)) {
-              res.setHeader('Content-Type', 'application/octet-stream')
-              Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v))
-              fs.createReadStream(fallback).pipe(res)
-              return
+            // Fallback: serve standard model only for known narrow model hashes
+            // (not for cw_detect or other types which have incompatible binary formats)
+            const NARROW_MODEL_HASHES = new Set([
+              '87f4f8a3164f727b5681a012b73dfa369d5177789aebafb4d8f37121fff836b0', // en_narrow_tiny
+              '894fe3acc4d459b0283747f5dc8e9ea1b2e3912d0e8075a244d8b95d841290be', // en_narrow_small
+            ])
+            if (NARROW_MODEL_HASHES.has(hash)) {
+              const fallback = path.resolve('./models/model_en.cwm')
+              if (fs.existsSync(fallback)) {
+                res.setHeader('Content-Type', 'application/octet-stream')
+                Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v))
+                fs.createReadStream(fallback).pipe(res)
+                return
+              }
             }
           }
 
