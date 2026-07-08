@@ -8,22 +8,31 @@ const corsHeaders = {
   'Cross-Origin-Resource-Policy': 'cross-origin',
 }
 
-// Domain gate patch: the pre-built bundle only loads models on deepcw/e04 hostnames.
-// Replace the check so it always returns true.
+const MAIN_BUNDLE = 'index-tGNLfWKa.js'
+
+// Patch 1: Domain gate — the bundle only loads models on deepcw/e04 hostnames.
 const DOMAIN_GATE_ORIGINAL = 'function Rs(){const t=globalThis.location.hostname;return t.includes("deepcw")||t.includes("e04")}'
 const DOMAIN_GATE_PATCHED  = 'function Rs(){return true}'
 
-const MAIN_BUNDLE = 'index-tGNLfWKa.js'
+// Patch 2: pb() loads the cw_detect model needed only for auto-frequency-detection.
+// When Rs() returns true (our patch), pb() no longer returns early, so it tries to
+// fetch the cw_detect model we don't have — blocking multi-mode from initialising.
+// Restore the early-return so multi-mode works without the cw_detect model.
+const PB_ORIGINAL = 'async function pb(t="wasm"){if(!Rs())return;const e="cw_detect"'
+const PB_PATCHED  = 'async function pb(t="wasm"){return;if(!Rs())return;const e="cw_detect"'
+
+function applyPatches(content) {
+  return content
+    .replace(DOMAIN_GATE_ORIGINAL, DOMAIN_GATE_PATCHED)
+    .replace(PB_ORIGINAL, PB_PATCHED)
+}
 
 function servePatched(filePath, res, extraHeaders = {}) {
   const content = fs.readFileSync(filePath, 'utf8')
-  const patched = content.includes(DOMAIN_GATE_ORIGINAL)
-    ? content.replace(DOMAIN_GATE_ORIGINAL, DOMAIN_GATE_PATCHED)
-    : content
   Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v))
   Object.entries(extraHeaders).forEach(([k, v]) => res.setHeader(k, v))
   res.setHeader('Content-Type', 'application/javascript')
-  res.end(patched)
+  res.end(applyPatches(content))
 }
 
 export default defineConfig({
