@@ -30,11 +30,33 @@ const BRAND_PATCHES = [
   ['Copyright \u00A9 2026 e04',              'Copyright \u00A9 2026 VU22DX'],
 ]
 
+// Patch 4: Remove visible icon/logo and GitHub links from the UI
+const UI_PATCHES = [
+  // Header logo icon
+  [
+    '(Pe=x.jsx("img",{src:"/icon.svg",alt:"","aria-hidden":"true",width:28,height:28,style:{display:"block",flexShrink:0,borderRadius:7}}),t[25]=Pe)',
+    '(Pe=null,t[25]=Pe)',
+  ],
+  // "Project Page" GitHub link button
+  [
+    'Zn=x.jsx(Ar,{component:"a",href:P$,target:"_blank",rel:"noreferrer",variant:"subtle",color:"gray",size:"xs",children:"Project Page"})',
+    'Zn=null',
+  ],
+  // Copyright GitHub href → plain text
+  [
+    'x.jsx(At,{component:"a",size:"xs",c:"dimmed",href:"https://github.com/e04/",style:{lineHeight:1,whiteSpace:"nowrap"},children:"Copyright \u00A9 2026 VU22DX"})',
+    'x.jsx(At,{size:"xs",c:"dimmed",style:{lineHeight:1,whiteSpace:"nowrap"},children:"Copyright \u00A9 2026 VU22DX"})',
+  ],
+]
+
 function applyPatches(content) {
   let out = content
     .replace(DOMAIN_GATE_ORIGINAL, DOMAIN_GATE_PATCHED)
     .replace(PB_ORIGINAL, PB_PATCHED)
   for (const [orig, patched] of BRAND_PATCHES) {
+    out = out.split(orig).join(patched)
+  }
+  for (const [orig, patched] of UI_PATCHES) {
     out = out.split(orig).join(patched)
   }
   return out
