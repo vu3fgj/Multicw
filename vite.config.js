@@ -49,6 +49,14 @@ const UI_PATCHES = [
   ],
 ]
 
+// Patch 5: Higher accuracy defaults — 12s decode window, 100ms refresh, "small" model
+const PERF_PATCHES = [
+  ['uC=6,',                                   'uC=12,'],
+  ['mI=6,',                                   'mI=12,'],
+  ['gy=200,',                                 'gy=100,'],
+  ['"decoder.modelSize","tiny",lW',           '"decoder.modelSize","small",lW'],
+]
+
 function applyPatches(content) {
   let out = content
     .replace(DOMAIN_GATE_ORIGINAL, DOMAIN_GATE_PATCHED)
@@ -57,6 +65,9 @@ function applyPatches(content) {
     out = out.split(orig).join(patched)
   }
   for (const [orig, patched] of UI_PATCHES) {
+    out = out.split(orig).join(patched)
+  }
+  for (const [orig, patched] of PERF_PATCHES) {
     out = out.split(orig).join(patched)
   }
   return out
