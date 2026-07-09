@@ -11,6 +11,88 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <title>VU22DX MULTI Decoders</title>
+    <!-- Tab audio capture: patches enumerateDevices and getUserMedia so the app's
+         existing audio-source dropdown gains a virtual "Browser Tab Audio" entry.
+         When selected, Chrome's tab-picker opens (user must tick "Share tab audio"). -->
+    <script>
+    (function () {
+      var TAB_DEVICE_ID = '__vu22dx_tab_audio__';
+      var TAB_DEVICE = {
+        deviceId: TAB_DEVICE_ID,
+        kind: 'audioinput',
+        label: 'Browser Tab Audio',
+        groupId: '',
+        toJSON: function () {
+          return { deviceId: this.deviceId, kind: this.kind, label: this.label, groupId: this.groupId };
+        }
+      };
+
+      var _enumDevices = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
+      var _getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+
+      var activeTabStream = null;
+
+      navigator.mediaDevices.enumerateDevices = function () {
+        return _enumDevices().then(function (devices) {
+          var already = devices.some(function (d) { return d.deviceId === TAB_DEVICE_ID; });
+          return already ? devices : devices.concat([TAB_DEVICE]);
+        });
+      };
+
+      navigator.mediaDevices.getUserMedia = function (constraints) {
+        var audio = constraints && constraints.audio;
+        var deviceId = audio && typeof audio === 'object'
+          ? (audio.deviceId && (audio.deviceId.exact || audio.deviceId))
+          : null;
+
+        if (deviceId === TAB_DEVICE_ID) {
+          // Stop any previous tab capture
+          if (activeTabStream) {
+            activeTabStream.getTracks().forEach(function (t) { t.stop(); });
+            activeTabStream = null;
+          }
+
+          return navigator.mediaDevices.getDisplayMedia({
+            video: { width: 1, height: 1, frameRate: 1 },
+            audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false }
+          }).then(function (displayStream) {
+            var audioTracks = displayStream.getAudioTracks();
+
+            // Stop the video track immediately — we only need audio
+            displayStream.getVideoTracks().forEach(function (t) { t.stop(); });
+
+            if (audioTracks.length === 0) {
+              throw new DOMException(
+                'No audio track captured. In the Chrome tab-picker, select a Tab and tick "Also share tab audio".',
+                'NotFoundError'
+              );
+            }
+
+            activeTabStream = new MediaStream(audioTracks);
+
+            // When the tab audio ends, fire devicechange so the app re-enumerates
+            audioTracks.forEach(function (t) {
+              t.addEventListener('ended', function () {
+                activeTabStream = null;
+                try { navigator.mediaDevices.dispatchEvent(new Event('devicechange')); } catch (e) {}
+              });
+            });
+
+            return activeTabStream;
+          });
+        }
+
+        return _getUserMedia(constraints);
+      };
+
+      // After the app loads, fire a devicechange so it picks up the virtual device
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          try { navigator.mediaDevices.dispatchEvent(new Event('devicechange')); } catch (e) {}
+        }, 800);
+      });
+    })();
+    </script>
     <script type="module" src="/assets/index-tGNLfWKa.js"></script>
     <link rel="stylesheet" href="/assets/index-DUzULV4R.css">
     <link rel="manifest" href="/manifest.webmanifest">
