@@ -10,18 +10,15 @@ const corsHeaders = {
 
 const MAIN_BUNDLE = 'index-tGNLfWKa.js'
 
-// Patch 1: Domain gate — the bundle only loads models on deepcw/e04 hostnames.
+// Patch 1: Domain gate — allow any host
 const DOMAIN_GATE_ORIGINAL = 'function Rs(){const t=globalThis.location.hostname;return t.includes("deepcw")||t.includes("e04")}'
 const DOMAIN_GATE_PATCHED  = 'function Rs(){return true}'
 
-// Patch 2: pb() loads the cw_detect model needed only for auto-frequency-detection.
-// When Rs() returns true (our patch), pb() no longer returns early, so it tries to
-// fetch the cw_detect model we don't have — blocking multi-mode from initialising.
-// Restore the early-return so multi-mode works without the cw_detect model.
+// Patch 2: Disable cw_detect model load (we don't have it; it blocks multi-mode init)
 const PB_ORIGINAL = 'async function pb(t="wasm"){if(!Rs())return;const e="cw_detect"'
 const PB_PATCHED  = 'async function pb(t="wasm"){return;if(!Rs())return;const e="cw_detect"'
 
-// Patch 3: Rebrand all visible DeepCW labels to VU22DX MULTI Decoders
+// Patch 3: Rebrand
 const BRAND_PATCHES = [
   ['k$="DeepCW"',                            'k$="VU22DX MULTI Decoders"'],
   ['"Add DeepCW to your Home Screen"',       '"Add VU22DX MULTI Decoders to your Home Screen"'],
@@ -30,31 +27,53 @@ const BRAND_PATCHES = [
   ['Copyright \u00A9 2026 e04',              'Copyright \u00A9 2026 VU22DX'],
 ]
 
-// Patch 4: Remove visible icon/logo and GitHub links from the UI
+// Patch 4: Remove visible icon/logo and GitHub links
 const UI_PATCHES = [
-  // Header logo icon
   [
     '(Pe=x.jsx("img",{src:"/icon.svg",alt:"","aria-hidden":"true",width:28,height:28,style:{display:"block",flexShrink:0,borderRadius:7}}),t[25]=Pe)',
     '(Pe=null,t[25]=Pe)',
   ],
-  // "Project Page" GitHub link button
   [
     'Zn=x.jsx(Ar,{component:"a",href:P$,target:"_blank",rel:"noreferrer",variant:"subtle",color:"gray",size:"xs",children:"Project Page"})',
     'Zn=null',
   ],
-  // Copyright GitHub href → plain text
   [
     'x.jsx(At,{component:"a",size:"xs",c:"dimmed",href:"https://github.com/e04/",style:{lineHeight:1,whiteSpace:"nowrap"},children:"Copyright \u00A9 2026 VU22DX"})',
     'x.jsx(At,{size:"xs",c:"dimmed",style:{lineHeight:1,whiteSpace:"nowrap"},children:"Copyright \u00A9 2026 VU22DX"})',
   ],
 ]
 
-// Patch 5: Higher accuracy defaults — 12s decode window, 100ms refresh, "small" model
+// Patch 5: Quality/model settings
+//
+// Model files we have:
+//   model_en.cwm      (563926 bytes) = en_tiny     hash ee47e1...
+//   model_en_high.cwm (523990 bytes) = en_narrow_tiny hash 87f4f8... (best narrow model available)
+//
+// Missing (no small/high-accuracy variant): en_small (051307), en_narrow_small (894fe3)
+// — these fall back to model_en.cwm in the server middleware below.
+//
+// Quality slider: low="tiny"/6s  mid="small"/12s  high="small"/18s
+//   "small" resolves to en_small hash → falls back to model_en.cwm (same weights as tiny,
+//   but with a longer decode window — still an improvement over the 6s low setting).
+//   When the real en_small model is added (051307 hash file), high/mid will use it automatically.
+//
+// Multi-mode (pile-up): uses englishModelVariant:"narrow" — always sends modelSize from user
+//   setting so low=tiny/mid=small/high=small. The narrow-small hash (894fe3) falls back to
+//   model_en_high.cwm which is the best narrow model we have.
 const PERF_PATCHES = [
-  ['uC=6,',                                   'uC=12,'],
-  ['mI=6,',                                   'mI=12,'],
-  ['gy=200,',                                 'gy=100,'],
-  ['"decoder.modelSize","tiny",lW',           '"decoder.modelSize","small",lW'],
+  // Decode windows: single uses [6,12,18], multi uses [6,12,18]
+  ['uC=12,', 'uC=12,'],   // single default window — keep at 12s (controlled by quality)
+  ['mI=12,', 'mI=12,'],   // multi default window — keep at 12s
+  // Refresh rate: 100ms for snappier display
+  ['gy=200,', 'gy=100,'],
+  // Default quality: "small" (HIGH) — best available model + long window
+  ['"decoder.modelSize","tiny",lW', '"decoder.modelSize","small",lW'],
+  // Quality presets: low=tiny/6s, mid=small/12s, high=small/18s
+  // Original: low=tiny/6s, mid=tiny/12s, high=small/12s
+  ['accuracy:"mid",accuracyLabel:"MID",modelSize:"tiny",windowSeconds:12',
+   'accuracy:"mid",accuracyLabel:"MID",modelSize:"small",windowSeconds:12'],
+  ['accuracy:"high",accuracyLabel:"HIGH",modelSize:"small",windowSeconds:12',
+   'accuracy:"high",accuracyLabel:"HIGH",modelSize:"small",windowSeconds:18'],
 ]
 
 function applyPatches(content) {
@@ -81,18 +100,30 @@ function servePatched(filePath, res, extraHeaders = {}) {
   res.end(applyPatches(content))
 }
 
+// Model hash → local file mapping
+// Hashes taken from the bundle's Xa constant:
+//   en.tiny        = ee47e1... → model_en.cwm       (563926 bytes)
+//   en.small       = 051307... → model_en.cwm        (fallback; real en_small not available)
+//   en_narrow.tiny = 87f4f8... → model_en_high.cwm   (523990 bytes — best narrow we have)
+//   en_narrow.small= 894fe3... → model_en_high.cwm   (fallback to best narrow we have)
+//   cw_detect      = 2794af... → (disabled; pb() returns early)
+const MODEL_HASH_MAP = {
+  'ee47e1c50b12354e2d6737e5b082428e9669fe22c68c208da74f1877c6763d7b': 'model_en.cwm',
+  '051307efd5ab1b129948077404d70879d239ac4ec19dc4899fe6d464707d3ffe': 'model_en.cwm',
+  '87f4f8a3164f727b5681a012b73dfa369d5177789aebafb4d8f37121fff836b0': 'model_en_high.cwm',
+  '894fe3acc4d459b0283747f5dc8e9ea1b2e3912d0e8075a244d8b95d841290be': 'model_en_high.cwm',
+}
+
 export default defineConfig({
   plugins: [
     {
       name: 'coop-coep-and-model-serving',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
-          // COOP/COEP on every response for SharedArrayBuffer support
           Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v))
 
           const urlPath = req.url?.split('?')[0] ?? ''
 
-          // Patch the main bundle to remove the domain gate
           if (urlPath.endsWith(MAIN_BUNDLE)) {
             const candidates = [
               path.resolve('./public/assets', MAIN_BUNDLE),
@@ -106,15 +137,16 @@ export default defineConfig({
             }
           }
 
-          // Serve model binary files: /models/<hash> → models/<hash>[.html]
           if (urlPath.startsWith('/models/')) {
             const hash = decodeURIComponent(urlPath.slice('/models/'.length))
-            const candidates = [
+
+            // First: try exact file match in public/models or models/
+            const exactCandidates = [
               path.resolve('./public/models', hash),
               path.resolve('./models', hash),
               path.resolve('./models', hash + '.html'),
             ]
-            for (const f of candidates) {
+            for (const f of exactCandidates) {
               if (fs.existsSync(f)) {
                 const size = fs.statSync(f).size
                 res.setHeader('Content-Type', 'application/octet-stream')
@@ -124,20 +156,17 @@ export default defineConfig({
                 return
               }
             }
-            // Fallback: serve standard model only for known narrow model hashes
-            // (not for cw_detect or other types which have incompatible binary formats)
-            const NARROW_MODEL_HASHES = new Set([
-              '87f4f8a3164f727b5681a012b73dfa369d5177789aebafb4d8f37121fff836b0', // en_narrow_tiny
-              '894fe3acc4d459b0283747f5dc8e9ea1b2e3912d0e8075a244d8b95d841290be', // en_narrow_small
-            ])
-            if (NARROW_MODEL_HASHES.has(hash)) {
-              const fallback = path.resolve('./models/model_en.cwm')
-              if (fs.existsSync(fallback)) {
-                const size = fs.statSync(fallback).size
+
+            // Second: use hash map to serve the correct model file
+            const mappedFile = MODEL_HASH_MAP[hash]
+            if (mappedFile) {
+              const modelPath = path.resolve('./models', mappedFile)
+              if (fs.existsSync(modelPath)) {
+                const size = fs.statSync(modelPath).size
                 res.setHeader('Content-Type', 'application/octet-stream')
                 res.setHeader('Content-Length', size)
                 Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v))
-                fs.createReadStream(fallback).pipe(res)
+                fs.createReadStream(modelPath).pipe(res)
                 return
               }
             }
