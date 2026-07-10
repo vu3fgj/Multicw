@@ -73,6 +73,18 @@ const PERF_PATCHES = [
   // Fix multi-mode: use standard (broadband) model instead of narrow (712-887Hz only)
   // Multi-mode's Yn() function already handles per-channel frequency windowing via Ut()
   ['modelSize:a,englishModelVariant:"narrow"', 'modelSize:a,englishModelVariant:"standard"'],
+  // Pile-up track separation improvements:
+  //
+  //   gf=3 → gf=2  : minimum bin gap between tracks in NE display filter
+  //                    37.5Hz → 25Hz — allows displaying two stations 30Hz apart as separate tracks
+  //
+  //   _m=Fr*2.5 → _m=Fr*1.5  : minimum Hz gap in mU candidate filter
+  //                              31.25Hz → 18.75Hz — allows candidate peaks 20Hz apart to both survive
+  //
+  // Combined with our inferenceWorker Gr=.08/Qr=.60 peak-splitting patch, stations as
+  // close as ~20Hz apart in audio frequency will each get a separate track and independent decode.
+  ['SI=15,gf=3,vI=SI,Y0=Fr*(gf-1),xI=Y0,_m=Fr*2.5',
+   'SI=15,gf=2,vI=SI,Y0=Fr*(gf-1),xI=Y0,_m=Fr*1.5'],
 ]
 
 function applyPatches(content) {
@@ -118,7 +130,23 @@ function servePatched(filePath, res, extraHeaders = {}) {
 //   - Two CW tones ~50Hz apart (4 bins at 12.5Hz resolution) get split correctly
 //   - Single tones with minor spectral ripple don't produce ghost channels
 const INFERENCE_WORKER_PATCHES = [
+  // Peak splitting: lower prominence/valley thresholds so closely-spaced CW tones split into
+  // separate candidates rather than merging into one broad peak.
+  // Original: Gr=.15, Qr=.75
   ['Gr=.15,Qr=.75', 'Gr=.08,Qr=.60'],
+  // Per-channel bandwidth control:
+  //
+  //   jt=qe=15 → jt=10  : maxHalfWidthBins drops from 7 to 5 bins = ±62.5Hz max half-width
+  //                         Max per-channel decode window: 10 bins × 12.5Hz = 125Hz total
+  //                         Prevents a loud station's window from expanding to eat a neighbor
+  //                         100Hz away. A CW signal needs only ~50-100Hz even at 60 WPM.
+  //
+  //   Kr=Yr=.5 → Kr=.75 : adjacentStrongBinThreshold raised from 50% → 75% of peak energy
+  //                         The fn() window only expands into adjacent bins when they have
+  //                         >75% of the peak's energy. This stops expansion at the valley
+  //                         between two adjacent signals and keeps each channel isolated.
+  ['qe=15,$t=3,jt=qe,qt=100,Yr=.5,Kr=Yr',
+   'qe=15,$t=3,jt=10,qt=100,Yr=.5,Kr=.75'],
 ]
 
 function applyWorkerPatches(content) {
