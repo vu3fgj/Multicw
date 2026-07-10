@@ -44,27 +44,22 @@ const UI_PATCHES = [
   ],
 ]
 
-// Patch 5: Quality/model settings
+// Patch 5: Quality/model settings and multi-mode model variant
 //
 // Model files we have:
-//   model_en.cwm      (563926 bytes) = en_tiny     hash ee47e1...
-//   model_en_high.cwm (523990 bytes) = en_narrow_tiny hash 87f4f8... (best narrow model available)
+//   model_en.cwm      (563926 bytes) = en_tiny    hash ee47e1... — broadband 400-1200Hz
+//   model_en_high.cwm (523990 bytes) = en_narrow_tiny hash 87f4f8... — narrow 712-887Hz ONLY
 //
-// Missing (no small/high-accuracy variant): en_small (051307), en_narrow_small (894fe3)
-// — these fall back to model_en.cwm in the server middleware below.
+// IMPORTANT: en_narrow model covers only a 175Hz window (712-887Hz). Multi-mode decodes
+// signals at arbitrary frequencies — using the narrow model means no decodes unless every
+// signal happens to be in that exact 175Hz band. Fix: patch multi-mode to use "standard"
+// variant (broadband en_tiny/en_small). The Yn() per-channel audio slicer (Ut()) already
+// extracts the correct frequency window per track, so the standard model works correctly.
+//
+// Missing: en_small (051307) — no higher-accuracy model available; falls back to model_en.cwm.
 //
 // Quality slider: low="tiny"/6s  mid="small"/12s  high="small"/18s
-//   "small" resolves to en_small hash → falls back to model_en.cwm (same weights as tiny,
-//   but with a longer decode window — still an improvement over the 6s low setting).
-//   When the real en_small model is added (051307 hash file), high/mid will use it automatically.
-//
-// Multi-mode (pile-up): uses englishModelVariant:"narrow" — always sends modelSize from user
-//   setting so low=tiny/mid=small/high=small. The narrow-small hash (894fe3) falls back to
-//   model_en_high.cwm which is the best narrow model we have.
 const PERF_PATCHES = [
-  // Decode windows: single uses [6,12,18], multi uses [6,12,18]
-  ['uC=12,', 'uC=12,'],   // single default window — keep at 12s (controlled by quality)
-  ['mI=12,', 'mI=12,'],   // multi default window — keep at 12s
   // Refresh rate: 100ms for snappier display
   ['gy=200,', 'gy=100,'],
   // Default quality: "small" (HIGH) — best available model + long window
@@ -75,6 +70,9 @@ const PERF_PATCHES = [
    'accuracy:"mid",accuracyLabel:"MID",modelSize:"small",windowSeconds:12'],
   ['accuracy:"high",accuracyLabel:"HIGH",modelSize:"small",windowSeconds:12',
    'accuracy:"high",accuracyLabel:"HIGH",modelSize:"small",windowSeconds:18'],
+  // Fix multi-mode: use standard (broadband) model instead of narrow (712-887Hz only)
+  // Multi-mode's Yn() function already handles per-channel frequency windowing via Ut()
+  ['modelSize:a,englishModelVariant:"narrow"', 'modelSize:a,englishModelVariant:"standard"'],
 ]
 
 function applyPatches(content) {
@@ -133,16 +131,19 @@ function applyWorkerPatches(content) {
 
 // Model hash → local file mapping
 // Hashes taken from the bundle's Xa constant:
-//   en.tiny        = ee47e1... → model_en.cwm       (563926 bytes)
-//   en.small       = 051307... → model_en.cwm        (fallback; real en_small not available)
-//   en_narrow.tiny = 87f4f8... → model_en_high.cwm   (523990 bytes — best narrow we have)
-//   en_narrow.small= 894fe3... → model_en_high.cwm   (fallback to best narrow we have)
+//   en.tiny        = ee47e1... → model_en.cwm       (broadband standard, 400-1200Hz)
+//   en.small       = 051307... → model_en.cwm        (no small variant; same weights)
+//   en_narrow.tiny = 87f4f8... → model_en.cwm        (use standard; narrow model is 712-887Hz only)
+//   en_narrow.small= 894fe3... → model_en.cwm        (use standard; narrow model is 712-887Hz only)
 //   cw_detect      = 2794af... → (disabled; pb() returns early)
+//
+// Multi-mode is patched to use "standard" variant so it correctly uses en_tiny/en_small
+// hashes (ee47e1/051307) rather than narrow hashes. Both point to model_en.cwm.
 const MODEL_HASH_MAP = {
   'ee47e1c50b12354e2d6737e5b082428e9669fe22c68c208da74f1877c6763d7b': 'model_en.cwm',
   '051307efd5ab1b129948077404d70879d239ac4ec19dc4899fe6d464707d3ffe': 'model_en.cwm',
-  '87f4f8a3164f727b5681a012b73dfa369d5177789aebafb4d8f37121fff836b0': 'model_en_high.cwm',
-  '894fe3acc4d459b0283747f5dc8e9ea1b2e3912d0e8075a244d8b95d841290be': 'model_en_high.cwm',
+  '87f4f8a3164f727b5681a012b73dfa369d5177789aebafb4d8f37121fff836b0': 'model_en.cwm',
+  '894fe3acc4d459b0283747f5dc8e9ea1b2e3912d0e8075a244d8b95d841290be': 'model_en.cwm',
 }
 
 export default defineConfig({
