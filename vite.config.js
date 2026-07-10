@@ -9,6 +9,7 @@ const corsHeaders = {
 }
 
 const MAIN_BUNDLE = 'index-tGNLfWKa.js'
+const INFERENCE_WORKER = 'inferenceWorker-Dy9Yeymx.js'
 
 // Patch 1: Domain gate — allow any host
 const DOMAIN_GATE_ORIGINAL = 'function Rs(){const t=globalThis.location.hostname;return t.includes("deepcw")||t.includes("e04")}'
@@ -100,6 +101,36 @@ function servePatched(filePath, res, extraHeaders = {}) {
   res.end(applyPatches(content))
 }
 
+// Patch 6: Tone separation for multi-mode (pile-up)
+//
+// The inferenceWorker detects CW signals by scanning the spectrogram for peaks.
+// In a pile-up, multiple stations transmit simultaneously on very close frequencies
+// (often within 50-200Hz of each other). The peak-splitting algorithm uses two
+// parameters to decide when to split a broad spectral peak into two separate tones:
+//
+//   Gr = splitProminence: how prominent the valley between two peaks must be.
+//        Lower = split more aggressively = better for closely-spaced signals.
+//        Original 0.15 → 0.08
+//
+//   Qr = splitValleyRatio: how deep the valley must be relative to the lower peak.
+//        Lower = allow shallower valleys = catches near-identical-frequency callers.
+//        Original 0.75 → 0.60
+//
+// These values were tuned so that:
+//   - Two CW tones ~50Hz apart (4 bins at 12.5Hz resolution) get split correctly
+//   - Single tones with minor spectral ripple don't produce ghost channels
+const INFERENCE_WORKER_PATCHES = [
+  ['Gr=.15,Qr=.75', 'Gr=.08,Qr=.60'],
+]
+
+function applyWorkerPatches(content) {
+  let out = content
+  for (const [orig, patched] of INFERENCE_WORKER_PATCHES) {
+    out = out.split(orig).join(patched)
+  }
+  return out
+}
+
 // Model hash → local file mapping
 // Hashes taken from the bundle's Xa constant:
 //   en.tiny        = ee47e1... → model_en.cwm       (563926 bytes)
@@ -132,6 +163,22 @@ export default defineConfig({
             for (const f of candidates) {
               if (fs.existsSync(f)) {
                 servePatched(f, res)
+                return
+              }
+            }
+          }
+
+          if (urlPath.endsWith(INFERENCE_WORKER)) {
+            const candidates = [
+              path.resolve('./public/assets', INFERENCE_WORKER),
+              path.resolve('./assets', INFERENCE_WORKER),
+            ]
+            for (const f of candidates) {
+              if (fs.existsSync(f)) {
+                const content = fs.readFileSync(f, 'utf8')
+                Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v))
+                res.setHeader('Content-Type', 'application/javascript')
+                res.end(applyWorkerPatches(content))
                 return
               }
             }
